@@ -69,10 +69,7 @@ fn print_final_table(runs: &Vec<GuessStatistics>) {
     println!("{table}");
 }
 
-fn calculate_max_y(runs: &[GuessStatistics], window_size: usize) -> u32 {
-    // 1. iter() -> create iterator
-    // 2. rev() -> flip it to start from the end
-    // 3. take(N) -> grab only the last N entries
+fn calculate_max_y(runs: &[GuessStatistics], window_size: usize) -> f64 {
     let max_val = runs
         .iter()
         .rev()
@@ -80,22 +77,18 @@ fn calculate_max_y(runs: &[GuessStatistics], window_size: usize) -> u32 {
         .map(|r| r.average_attempts as u32)
         .max(); // Find the highest value among the recent runs
 
-    // If we found a max, add 10 padding.
-    // If the list was empty (None), default to 0 + 10 = 10.
-    max_val.unwrap_or(0) + 1
+    max_val.unwrap_or(0) as f64 + 1.0
 }
 
 fn draw_chart(
     root: &DrawingArea<BitMapBackend<'_>, plotters::coord::Shift>,
     runs: &Vec<GuessStatistics>,
 ) {
-    // let max_y = runs.iter().map(|r| r.median_attempts).max().unwrap_or(10);
-    let max_y = calculate_max_y(&runs, 2) as f64;
+    let max_y = calculate_max_y(&runs, 2);
 
-    // FIX 2: Explicitly define axes as u32 ranges
     let x_range = 0u32..(runs.len() as u32 + 5);
     let x_range_secondary = 0u32..(runs.len() as u32 + 5);
-    let y_range = 0f64..(max_y + 5.);
+    let y_range = 0f64..(max_y + 5.0);
     let y_range_secondary = 0.0f64
         ..(runs
             .iter()
