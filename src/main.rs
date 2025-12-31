@@ -17,6 +17,8 @@ use tabled::{
 const MIN_GUESS_RANGE: u32 = 1;
 const MAX_GUESS_RANGE: u32 = 100_000_000;
 const GAMES_TO_PLAY: u32 = 500_000;
+const WINDOW_WIDTH: u32 = (3840 as f64 / 1.75) as u32;
+const WINDOW_HEIGHT: u32 = (2160 as f64 / 1.75) as u32;
 
 #[derive(Tabled)]
 struct GuessStatistics {
@@ -82,7 +84,7 @@ fn calculate_max_y(runs: &[GuessStatistics], window_size: usize) -> f64 {
 
 fn draw_chart(
     root: &DrawingArea<BitMapBackend<'_>, plotters::coord::Shift>,
-    runs: &Vec<GuessStatistics>,
+    runs: &[GuessStatistics],
 ) {
     let max_y = calculate_max_y(&runs, 2);
 
@@ -139,10 +141,10 @@ fn draw_chart(
         .label("Median Attempts")
         .legend(|(x, y)| Rectangle::new([(x - 15, y + 1), (x, y)], BLUE));
 
-    let take_ammount = match runs.len() as u32 {
+    let take_amount = match runs.len() as u32 {
         0 => 0,
         n => n - 1,
-    }; // Take this ammount so it does not exceed the x axis range
+    }; // Take this amount so it does not exceed the x axis range
 
     chart
         .draw_series(LineSeries::new(
@@ -150,7 +152,7 @@ fn draw_chart(
                 .get()
                 .unwrap()
                 .iter()
-                .take(take_ammount as usize)
+                .take(take_amount as usize)
                 .copied(),
             &GREEN,
         ))
@@ -184,20 +186,17 @@ fn draw_chart(
 fn draw_2d_with_chart(
     window: &mut PistonWindow,
     event: &piston_window::Event,
-    texture_context: &mut piston_window::G2dTextureContext,
-    pixel_buffer: &mut Vec<u8>,
-    width: u32,
-    height: u32,
-    runs: &Vec<GuessStatistics>,
+    runs: &[GuessStatistics],
 ) {
-    // --- PHASE B: RENDER ---
+    let mut texture_context = window.create_texture_context();
+
     window.draw_2d(event, |c, g, _device| {
         clear([1.0; 4], g);
+        let mut pixel_buffer = vec![0u8; (WINDOW_WIDTH * WINDOW_HEIGHT * 3) as usize];
 
-        // 1. Draw Chart to CPU Buffer (RGB)
         {
-            let root =
-                BitMapBackend::with_buffer(pixel_buffer, (width, height)).into_drawing_area();
+            let root = BitMapBackend::with_buffer(&mut pixel_buffer, (WINDOW_WIDTH, WINDOW_HEIGHT))
+                .into_drawing_area();
             root.fill(&WHITE).unwrap();
             draw_chart(&root, runs);
         }
@@ -205,14 +204,14 @@ fn draw_2d_with_chart(
         // 2. Convert RGB Buffer to RGBA Texture
         // Piston requires RGBA (Alpha channel), but Plotters gave us RGB.
         let img_buffer =
-            ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, pixel_buffer.clone()).unwrap();
+            ImageBuffer::<Rgb<u8>, _>::from_raw(WINDOW_WIDTH, WINDOW_HEIGHT, pixel_buffer).unwrap();
 
         // Use DynamicImage to convert RGB -> RGBA8
         let rgba_image = DynamicImage::ImageRgb8(img_buffer).to_rgba8();
 
         // 3. Upload to GPU
         let texture = Texture::from_image(
-            texture_context,
+            &mut texture_context,
             &rgba_image, // Pass the RGBA image, not the buffer
             &TextureSettings::new(),
         )
@@ -256,20 +255,13 @@ fn main() {
     let mut finished = false;
 
     // --- 2. WINDOW SETUP ---
-    let width = (3840 as f64 / 1.75) as u32;
-    let height = (2160 as f64 / 1.75) as u32;
-    let mut window: PistonWindow = WindowSettings::new("Live Stats", [width, height])
+    let mut window: PistonWindow = WindowSettings::new("Live Stats", [WINDOW_WIDTH, WINDOW_HEIGHT])
         .samples(4)
         .exit_on_esc(true)
         .build()
         .unwrap();
 
     window.set_max_fps(60);
-
-    let mut texture_context = window.create_texture_context();
-
-    // Buffer: Plotters works best with RGB (3 bytes)
-    let mut pixel_buffer = vec![0u8; (width * height * 3) as usize];
 
     // Precompute theoretical curve for reference
     THEORETICAL_CURVE.get_or_init(|| {
@@ -288,14 +280,6 @@ fn main() {
                 finished = true;
             }
         }
-        draw_2d_with_chart(
-            &mut window,
-            &event,
-            &mut texture_context,
-            &mut pixel_buffer,
-            width,
-            height,
-            &runs,
-        );
+        draw_2d_with_chart(&mut window, &event, &runs);
     }
 }
