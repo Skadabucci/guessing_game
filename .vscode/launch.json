@@ -5,13 +5,13 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug executable 'rust_eration_engine'",
+            "name": "Debug executable 'guessing_game'",
             "type": "lldb",
             "request": "launch",
             "cargo": {
                 "args": [
                     "run",
-                    "--bin=rust_eration_engine"
+                    "--bin=guessing_game"
                 ]
             },
             "env": {
@@ -20,13 +20,13 @@
             "args": []
         },
         {
-            "name": "Debug unit tests in executable 'rust_eration_engine'",
+            "name": "Debug unit tests in executable 'guessing_game'",
             "type": "lldb",
             "request": "launch",
             "cargo": {
                 "args": [
                     "test",
-                    "--bin=rust_eration_engine"
+                    "--bin=guessing_game"
                 ]
             },
             "env": {

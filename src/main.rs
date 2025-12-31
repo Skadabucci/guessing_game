@@ -75,17 +75,146 @@ fn calculate_max_y(runs: &[GuessStatistics], window_size: usize) -> u32 {
         .iter()
         .rev()
         .take(window_size)
-        .map(|r| {
-            // Convert average to u32 so we can compare it with median
-            let avg = r.average_attempts as u32;
-            // Return the larger of the two for this specific run
-            cmp::max(avg, r.median_attempts)
-        })
+        .map(|r| r.average_attempts as u32)
         .max(); // Find the highest value among the recent runs
 
     // If we found a max, add 10 padding.
     // If the list was empty (None), default to 0 + 10 = 10.
     max_val.unwrap_or(0) + 1
+}
+
+fn draw_plot(
+    window: &mut PistonWindow,
+    event: &piston_window::Event,
+    texture_context: &mut piston_window::G2dTextureContext,
+    pixel_buffer: &mut Vec<u8>,
+    width: u32,
+    height: u32,
+    runs: &Vec<GuessStatistics>,
+    theoretical_curve: &Vec<(u32, f64)>,
+) {
+    // --- PHASE B: RENDER ---
+    window.draw_2d(event, |c, g, _device| {
+        clear([1.0; 4], g);
+
+        // 1. Draw Chart to CPU Buffer (RGB)
+        {
+            let root =
+                BitMapBackend::with_buffer(pixel_buffer, (width, height)).into_drawing_area();
+
+            root.fill(&WHITE).unwrap();
+
+            // let max_y = runs.iter().map(|r| r.median_attempts).max().unwrap_or(10);
+            let max_y = calculate_max_y(&runs, 2) as f64;
+
+            // FIX 2: Explicitly define axes as u32 ranges
+            let x_range = 0u32..(runs.len() as u32 + 5);
+            let x_range_secondary = 0u32..(runs.len() as u32 + 5);
+            let y_range = 0f64..(max_y + 5.);
+            let y_range_secondary = 0.0f64
+                ..(runs
+                    .iter()
+                    .map(|r| r.elapsed_time.as_secs_f64())
+                    .fold(0. / 0., f64::max)
+                    + 1.0);
+
+            let mut chart = ChartBuilder::on(&root)
+                .margin(7)
+                .set_left_and_bottom_label_area_size(20)
+                .right_y_label_area_size(20)
+                .build_cartesian_2d(x_range, y_range)
+                .unwrap()
+                .set_secondary_coord(x_range_secondary, y_range_secondary);
+
+            chart
+                .configure_mesh()
+                .y_desc("Avg & Med Attempts")
+                .draw()
+                .unwrap();
+
+            chart
+                .configure_secondary_axes()
+                .y_desc("Elapsed Time (s)")
+                .draw()
+                .unwrap();
+
+            chart
+                .draw_series(LineSeries::new(
+                    runs.iter()
+                        .enumerate()
+                        // FIX 2: Ensure data is cast to u32 to match the axes
+                        .map(|(i, r)| (i as u32, r.average_attempts)),
+                    &RED,
+                ))
+                .unwrap()
+                .label("Average Attempts")
+                .legend(|(x, y)| Rectangle::new([(x - 15, y + 1), (x, y)], RED));
+
+            chart
+                .draw_series(LineSeries::new(
+                    runs.iter()
+                        .enumerate()
+                        // FIX 2: Ensure data is cast to u32 to match the axes
+                        .map(|(i, r)| (i as u32, r.median_attempts as f64)),
+                    &BLUE,
+                ))
+                .unwrap()
+                .label("Median Attempts")
+                .legend(|(x, y)| Rectangle::new([(x - 15, y + 1), (x, y)], BLUE));
+
+            chart
+                .draw_series(LineSeries::new(
+                    theoretical_curve[..runs.len() + 1].iter().copied(),
+                    &GREEN,
+                ))
+                .unwrap()
+                .label("2 * ln(x)")
+                .legend(|(x, y)| Rectangle::new([(x - 15, y + 1), (x, y)], GREEN));
+
+            chart
+                .draw_secondary_series(LineSeries::new(
+                    runs.iter()
+                        .enumerate()
+                        .map(|(i, r)| (i as u32, r.elapsed_time.as_secs_f64())),
+                    &BLACK,
+                ))
+                .unwrap()
+                .label("Elapsed Time (s)")
+                .legend(|(x, y)| Rectangle::new([(x - 15, y + 1), (x, y)], BLACK));
+
+            // chart.configure_series_labels().draw().unwrap();
+
+            chart
+                .configure_series_labels()
+                .position(SeriesLabelPosition::UpperRight)
+                .margin(20)
+                .legend_area_size(5)
+                .border_style(BLUE)
+                .background_style(BLUE.mix(0.1))
+                .label_font(("Calibri", 20))
+                .draw()
+                .unwrap();
+        }
+
+        // 2. Convert RGB Buffer to RGBA Texture
+        // Piston requires RGBA (Alpha channel), but Plotters gave us RGB.
+        let img_buffer =
+            ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, pixel_buffer.clone()).unwrap();
+
+        // Use DynamicImage to convert RGB -> RGBA8
+        let rgba_image = DynamicImage::ImageRgb8(img_buffer).to_rgba8();
+
+        // 3. Upload to GPU
+        let texture = Texture::from_image(
+            texture_context,
+            &rgba_image, // Pass the RGBA image, not the buffer
+            &TextureSettings::new(),
+        )
+        .unwrap();
+
+        // 4. Draw
+        piston_window::image(&texture, c.transform, g);
+    });
 }
 
 fn main() {
@@ -149,128 +278,15 @@ fn main() {
                 finished = true;
             }
         }
-
-        // --- PHASE B: RENDER ---
-        window.draw_2d(&event, |c, g, _device| {
-            clear([1.0; 4], g);
-
-            // 1. Draw Chart to CPU Buffer (RGB)
-            {
-                let root = BitMapBackend::with_buffer(&mut pixel_buffer, (width, height))
-                    .into_drawing_area();
-
-                root.fill(&WHITE).unwrap();
-
-                // let max_y = runs.iter().map(|r| r.median_attempts).max().unwrap_or(10);
-                let max_y = calculate_max_y(&runs, 5) as f64;
-
-                // FIX 2: Explicitly define axes as u32 ranges
-                let x_range = 0u32..(runs.len() as u32 + 5);
-                let x_range_secondary = 0u32..(runs.len() as u32 + 5);
-                let y_range = 0f64..(max_y + 5.);
-                let y_range_secondary = 0.0f64
-                    ..(runs
-                        .iter()
-                        .map(|r| r.elapsed_time.as_secs_f64())
-                        .fold(0. / 0., f64::max)
-                        + 1.0);
-
-                let mut chart = ChartBuilder::on(&root)
-                    .margin(7)
-                    .set_left_and_bottom_label_area_size(20)
-                    .right_y_label_area_size(20)
-                    .build_cartesian_2d(x_range, y_range)
-                    .unwrap()
-                    .set_secondary_coord(x_range_secondary, y_range_secondary);
-
-                chart
-                    .configure_mesh()
-                    .y_desc("Avg & Med Attempts")
-                    .draw()
-                    .unwrap();
-
-                chart
-                    .configure_secondary_axes()
-                    .y_desc("Elapsed Time (s)")
-                    .draw()
-                    .unwrap();
-
-                chart
-                    .draw_series(LineSeries::new(
-                        runs.iter()
-                            .enumerate()
-                            // FIX 2: Ensure data is cast to u32 to match the axes
-                            .map(|(i, r)| (i as u32, r.average_attempts)),
-                        &RED,
-                    ))
-                    .unwrap()
-                    .label("Average Attempts")
-                    .legend(|(x, y)| Rectangle::new([(x - 15, y + 1), (x, y)], RED));
-
-                chart
-                    .draw_series(LineSeries::new(
-                        runs.iter()
-                            .enumerate()
-                            // FIX 2: Ensure data is cast to u32 to match the axes
-                            .map(|(i, r)| (i as u32, r.median_attempts as f64)),
-                        &BLUE,
-                    ))
-                    .unwrap()
-                    .label("Median Attempts")
-                    .legend(|(x, y)| Rectangle::new([(x - 15, y + 1), (x, y)], BLUE));
-
-                chart
-                    .draw_series(LineSeries::new(
-                        theoretical_curve[..runs.len() + 1].iter().copied(),
-                        &GREEN,
-                    ))
-                    .unwrap()
-                    .label("2 * ln(x)")
-                    .legend(|(x, y)| Rectangle::new([(x - 15, y + 1), (x, y)], GREEN));
-
-                chart
-                    .draw_secondary_series(LineSeries::new(
-                        runs.iter()
-                            .enumerate()
-                            .map(|(i, r)| (i as u32, r.elapsed_time.as_secs_f64())),
-                        &BLACK,
-                    ))
-                    .unwrap()
-                    .label("Elapsed Time (s)")
-                    .legend(|(x, y)| Rectangle::new([(x - 15, y + 1), (x, y)], BLACK));
-
-                // chart.configure_series_labels().draw().unwrap();
-
-                chart
-                    .configure_series_labels()
-                    .position(SeriesLabelPosition::UpperRight)
-                    .margin(20)
-                    .legend_area_size(5)
-                    .border_style(BLUE)
-                    .background_style(BLUE.mix(0.1))
-                    .label_font(("Calibri", 20))
-                    .draw()
-                    .unwrap();
-            }
-
-            // 2. Convert RGB Buffer to RGBA Texture
-            // Piston requires RGBA (Alpha channel), but Plotters gave us RGB.
-            let img_buffer =
-                ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, pixel_buffer.clone()).unwrap();
-
-            // Use DynamicImage to convert RGB -> RGBA8
-            let rgba_image = DynamicImage::ImageRgb8(img_buffer).to_rgba8();
-
-            // 3. Upload to GPU
-            let texture = Texture::from_image(
-                &mut texture_context,
-                &rgba_image, // Pass the RGBA image, not the buffer
-                &TextureSettings::new(),
-            )
-            .unwrap();
-
-            // 4. Draw
-            piston_window::image(&texture, c.transform, g);
-        });
+        draw_plot(
+            &mut window,
+            &event,
+            &mut texture_context,
+            &mut pixel_buffer,
+            width,
+            height,
+            &runs,
+            &theoretical_curve,
+        );
     }
 }
